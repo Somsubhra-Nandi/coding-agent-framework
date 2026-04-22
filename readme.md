@@ -5,7 +5,7 @@ Parses a Java Spring Boot repository using Tree-sitter, stores it as a property 
 ## Setup
 
 ```bash
-pip install tree-sitter tree-sitter-java neo4j mcp
+pip install -r requirements.txt
 ```
 
 Set Neo4j credentials via environment variables (defaults shown):
@@ -26,7 +26,7 @@ python main.py /path/to/java/repo --verbose
 ## Run Tests
 
 ```bash
-pytest tests/
+python -m pytest tests/
 ```
 
 ## Start MCP Server
