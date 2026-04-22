@@ -112,6 +112,17 @@ def push_to_neo4j(class_data: ClassData, driver: Driver | None = None) -> None:
                 method_name=method.name,
             )
 
+        # MERGE Method-[:CALLS]->Method for extracted calls
+            for called_name in method.calls:
+                session.run(
+                    "MATCH (m:Method {name: $method_name, class_name: $class_name}) "
+                    "MERGE (called:Method {name: $called_name}) "
+                    "MERGE (m)-[:CALLS]->(called)",
+                    method_name=method.name,
+                    class_name=class_data.name,
+                    called_name=called_name,
+                )
+        
         # MERGE Class-[:DEPENDS_ON]->Class for @Autowired deps
         for dep in class_data.autowired_deps:
             session.run(
