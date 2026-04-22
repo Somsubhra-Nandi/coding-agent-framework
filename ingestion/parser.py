@@ -167,11 +167,13 @@ def _get_methods(root: Node, src: bytes) -> list[MethodData]:
                     break  # stop after modifiers, never touch parameters
 
             source_code = _node_text(member, src)
+            calls = _get_method_calls(member, src)
             methods.append(MethodData(
                 name=method_name,
                 http_method=http_method,
                 endpoint=endpoint,
                 source_code=source_code,
+                calls=calls,
             ))
     return methods
 
