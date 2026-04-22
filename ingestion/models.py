@@ -10,7 +10,7 @@ class MethodData:
     http_method: str | None
     endpoint: str | None
     source_code: str
-
+    calls: list[str] = field(default_factory=list)
 
 @dataclass
 class ClassData:
