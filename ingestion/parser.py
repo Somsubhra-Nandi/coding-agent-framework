@@ -129,6 +129,19 @@ def _extract_annotation_info(modifiers: Node, src: bytes) -> tuple[str | None, s
     return None, None
 
 
+def _get_method_calls(method_node: Node, src: bytes) -> list[str]:
+    """Extract method call names from a method body."""
+    calls = []
+    def walk(node: Node):
+        if node.type == "method_invocation":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                calls.append(_node_text(name_node, src))
+        for child in node.children:
+            walk(child)
+    walk(method_node)
+    return calls
+
 def _get_methods(root: Node, src: bytes) -> list[MethodData]:
     methods: list[MethodData] = []
     for class_node in root.children:
