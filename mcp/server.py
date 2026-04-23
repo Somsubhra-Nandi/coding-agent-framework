@@ -89,7 +89,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         query = arguments["query"]
         with driver.session() as session:
             result = session.run(
-                "CALL db.index.fulltext.queryNodes('method_search', $query) "
+                "CALL db.index.fulltext.queryNodes('method_search', $searchQuery) "
                 "YIELD node, score "
                 "RETURN node.name AS method, node.class_name AS class, "
                 "       node.http_method AS http_method, node.endpoint AS endpoint, "
