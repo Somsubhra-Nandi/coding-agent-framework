@@ -4,24 +4,28 @@ Tools: search_code, get_call_graph, read_file, find_by_endpoint
 """
 from __future__ import annotations
 
+import sys
 import os
+from pathlib import Path
+from dotenv import dotenv_values
 
+_here = Path(__file__).parent         
+_root = _here.parent                   
+_env  = dotenv_values(_root / ".env")
+_project_root = _env.get("AMRIT_PROJECT_ROOT", str(_root))
+
+sys.path.append(_project_root)
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import logging
-import os
-from pathlib import Path
-
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
-
 from ingestion.graph import get_driver
 
 log = logging.getLogger(__name__)
-
 app = Server("amrit-graphrag")
 
 
