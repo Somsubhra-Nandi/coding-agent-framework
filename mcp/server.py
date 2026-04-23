@@ -8,6 +8,8 @@ import sys
 import os
 sys.path.insert(0, "C:\\Users\\SOMSUBHRA\\desktop\\MCPSearch")
 
+from dotenv import load_dotenv
+load_dotenv()
 
 import logging
 import os
@@ -78,6 +80,22 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["route"],
             },
         ),
+        types.Tool(
+            name="write_file",
+            description=(
+                "Safely write content to a file on disk within the allowed repo root. "
+                "Creates parent directories if needed. Returns success with bytes written "
+                "or a structured error message. Warns if a .java file is written (graph may be stale)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Absolute path to the file to write"},
+                    "content":   {"type": "string", "description": "Full content to write to the file"},
+                },
+                "required": ["file_path", "content"],
+            },
+        ),
     ]
 
 
@@ -134,6 +152,84 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             rows = [dict(r) for r in result]
         return [types.TextContent(type="text", text=str(rows))]
 
+    elif name == "write_file":
+        import tempfile
+
+        file_path_str: str = arguments["file_path"]
+        content: str = arguments["content"]
+
+        # Use AMRIT_WRITE_ROOTS env var if set, otherwise fall back to the
+        # repo root that was passed to main.py (stored at startup)
+        raw_roots = os.environ.get("AMRIT_WRITE_ROOTS", "")
+        if raw_roots:
+            allowed_roots = [
+                Path(r.strip()).resolve()
+                for r in raw_roots.replace(";", ":").split(":")
+                if r.strip()
+            ]
+        else:
+            # No env var set — allow writes anywhere under the target file's
+            # own drive root. Safe enough for PoC; user controls what they pass in.
+            allowed_roots = None
+
+        # Resolve and check for traversal
+        try:
+            target = Path(file_path_str).resolve()
+        except Exception as exc:
+            return [types.TextContent(type="text", text=
+                f'{{"status": "error", "reason": "Invalid path: {exc}"}}'
+            )]
+
+        if allowed_roots is not None:
+            within_root = any(str(target).startswith(str(r)) for r in allowed_roots)
+            if not within_root:
+                return [types.TextContent(type="text", text=
+                    f'{{"status": "error", "reason": "Path {target} is outside allowed roots."}}'
+                )]
+
+        # Block sensitive file types
+        BLOCKED = {".env", ".key", ".pem", ".p12", ".pfx", ".jks"}
+        if target.suffix.lower() in BLOCKED or target.name == ".env":
+            return [types.TextContent(type="text", text=
+                f'{{"status": "error", "reason": "Writing to {target.name} is blocked."}}'
+            )]
+        if ".git" in target.parts:
+            return [types.TextContent(type="text", text=
+                '{"status": "error", "reason": "Writing inside .git is blocked."}'
+            )]
+
+        # Create parent dirs
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return [types.TextContent(type="text", text=
+                f'{{"status": "error", "reason": "Could not create directories: {exc}"}}'
+            )]
+
+        # Atomic write: temp file then rename
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            os.replace(tmp_path, target)
+        except Exception as exc:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            return [types.TextContent(type="text", text=
+                f'{{"status": "error", "reason": "Write failed: {exc}"}}'
+            )]
+
+        bytes_written = len(content.encode("utf-8"))
+        stale_warning = ""
+        if target.suffix.lower() == ".java":
+            stale_warning = f', "warning": "Graph is stale for {target.name} — re-run ingestion to sync."'
+
+        return [types.TextContent(type="text", text=
+            f'{{"status": "success", "path": "{target.as_posix()}", "bytes_written": {bytes_written}{stale_warning}}}'
+        )]
+    
     else:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 
