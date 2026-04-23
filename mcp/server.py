@@ -4,9 +4,8 @@ Tools: search_code, get_call_graph, read_file, find_by_endpoint
 """
 from __future__ import annotations
 
-import sys
 import os
-sys.path.insert(0, "C:\\Users\\SOMSUBHRA\\desktop\\MCPSearch")
+
 
 from dotenv import load_dotenv
 load_dotenv()
