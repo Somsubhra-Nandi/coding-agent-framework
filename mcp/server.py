@@ -249,6 +249,119 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             f'{{"status": "success", "path": "{target.as_posix()}", "bytes_written": {bytes_written}{stale_warning}}}'
         )]
     
+    elif name == "answer_codebase_question":
+        question: str = arguments["question"]
+
+        # ── Step 1: Extract key terms (no LLM, pure string processing) ────────
+        STOP_WORDS = {
+            "how", "does", "what", "is", "the", "a", "an", "in", "on", "at",
+            "to", "for", "of", "and", "or", "where", "which", "who", "when",
+            "do", "did", "can", "could", "would", "should", "work", "works",
+            "get", "find", "show", "tell", "me", "i", "we", "use", "used",
+            "with", "from", "this", "that", "are", "was", "be", "been", "by",
+        }
+        words = question.lower().replace("?", "").replace(",", "").split()
+        key_terms = list(dict.fromkeys(          # preserve order, deduplicate
+            w for w in words
+            if w not in STOP_WORDS and len(w) > 2
+        ))[:3]                                   # max 3 terms
+
+        if not key_terms:
+            return [types.TextContent(type="text", text=
+                "Could not extract key terms from question. "
+                "Try being more specific, e.g. 'How does beneficiary registration work?'"
+            )]
+
+        # ── Step 2: Search graph for each key term ─────────────────────────────
+        seen_methods: dict[str, dict] = {}       # method name → row dict
+
+        with driver.session() as session:
+            for term in key_terms:
+                try:
+                    result = session.run(
+                        "CALL db.index.fulltext.queryNodes('method_search', $searchQuery) "
+                        "YIELD node, score "
+                        "RETURN node.name      AS method, "
+                        "       node.class_name AS class, "
+                        "       node.http_method AS http_method, "
+                        "       node.endpoint   AS endpoint, "
+                        "       score "
+                        "ORDER BY score DESC LIMIT 5",
+                        searchQuery=term,
+                    )
+                    for row in result:
+                        r = dict(row)
+                        m_name = r.get("method") or ""
+                        if m_name and m_name not in seen_methods:
+                            seen_methods[m_name] = r
+                except Exception:
+                    continue                      # skip failed term, keep going
+
+        if not seen_methods:
+            return [types.TextContent(type="text", text=
+                f"No methods found in the graph for terms: {key_terms}. "
+                "Try re-running ingestion or use search_code with a different term."
+            )]
+
+        # ── Step 3: Get call graph for each unique method (max 5) ─────────────
+        call_chains: dict[str, list[dict]] = {}
+
+        with driver.session() as session:
+            for method_name in list(seen_methods.keys())[:5]:
+                try:
+                    result = session.run(
+                        "MATCH (m:Method {name: $methodName})-[:CALLS*1..3]->(d) "
+                        "RETURN d.name       AS callee, "
+                        "       d.class_name AS class, "
+                        "       d.endpoint   AS endpoint",
+                        methodName=method_name,
+                    )
+                    call_chains[method_name] = [dict(r) for r in result]
+                except Exception:
+                    call_chains[method_name] = []
+
+        # ── Step 4: Format output ──────────────────────────────────────────────
+        lines: list[str] = []
+
+        lines.append(f"QUESTION: {question}")
+        lines.append(f"KEY TERMS EXTRACTED: {key_terms}")
+        lines.append("=" * 60)
+
+        lines.append("\n── SECTION 1: MATCHING METHODS ──")
+        for i, (m_name, row) in enumerate(seen_methods.items(), 1):
+            cls       = row.get("class")      or "unknown"
+            http_m    = row.get("http_method") or ""
+            endpoint  = row.get("endpoint")   or ""
+            score     = row.get("score")      or 0
+
+            lines.append(f"\n[{i}] {m_name}")
+            lines.append(f"    Class    : {cls}")
+            if http_m and endpoint:
+                lines.append(f"    Endpoint : {http_m} {endpoint}")
+            elif endpoint:
+                lines.append(f"    Endpoint : {endpoint}")
+            lines.append(f"    Score    : {score:.3f}")
+
+        lines.append("\n── SECTION 2: CALL CHAINS ──")
+        for m_name, callees in call_chains.items():
+            lines.append(f"\n{m_name} calls:")
+            if not callees:
+                lines.append("    (no outgoing calls recorded or not yet indexed)")
+            else:
+                for hop in callees:
+                    callee   = hop.get("callee")   or "?"
+                    cls      = hop.get("class")    or "?"
+                    endpoint = hop.get("endpoint") or ""
+                    suffix   = f"  →  {endpoint}" if endpoint else ""
+                    lines.append(f"    → {callee}  [{cls}]{suffix}")
+
+        lines.append("\n" + "=" * 60)
+        lines.append(
+            "NOTE: Re-run ingestion if recently written files are missing from results."
+        )
+
+        return [types.TextContent(type="text", text="\n".join(lines))]
+    
     else:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 
