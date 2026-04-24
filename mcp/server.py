@@ -99,6 +99,22 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["file_path", "content"],
             },
         ),
+        types.Tool(
+            name="answer_codebase_question",
+            description=(
+                "Takes a natural language question about the codebase, extracts key terms, "
+                "searches the graph across multiple angles, and returns structured context: "
+                "matching methods with their class/file/endpoint, plus call chains up to 3 hops. "
+                "Use this as the first tool for any 'how does X work' or 'where is Y' question."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "Natural language question about the codebase"}
+                },
+                "required": ["question"],
+            },
+        ),
     ]
 
 
